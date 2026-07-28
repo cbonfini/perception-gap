@@ -59,6 +59,11 @@ code{background:var(--surface-alt);border:1px solid var(--border-soft);border-ra
 footer{border-top:1px solid var(--border-soft);background:#fff}
 footer .wrap{padding:18px 22px;font-size:.83rem;color:var(--text-muted)}
 .hidden{display:none!important}
+#pvOverlay{position:fixed;inset:0;background:#fff;z-index:50;display:flex;flex-direction:column}
+#pvBar{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--border-soft);background:var(--surface)}
+#pvBar b{font-size:.95rem;color:#0f172a}
+#pvBar .btn{margin-left:auto}
+#pvFrame{flex:1;border:0;width:100%}
 details.help{margin:0 0 18px;border:1px solid var(--border-soft);border-radius:var(--rs);background:#fff;padding:12px 18px}
 details.help summary{cursor:pointer;font-weight:700;color:var(--ink)}
 details.help li{margin-bottom:.4em}
@@ -112,6 +117,11 @@ details.help li{margin-bottom:.4em}
 </div>
 
 </div></main>
+<div id="pvOverlay" class="hidden" role="dialog" aria-modal="true" aria-label="Game preview">
+  <div id="pvBar"><b>Previewing your game</b><span style="font-size:.85rem;color:var(--text-muted)">This is exactly what players will see.</span>
+  <button class="btn small" id="pvClose">✕ Close preview</button></div>
+  <iframe id="pvFrame" title="Game preview"></iframe>
+</div>
 <footer><div class="wrap">A free template from the Perception Gap project. The generated game is a single static page: it works offline, in any LMS, with any number of simultaneous players, and stores nothing about them.</div></footer>
 
 <script>
@@ -227,9 +237,20 @@ $('loadExample').addEventListener('click',function(){
 });
 $('preview').addEventListener('click',function(){
   var d=requireValid();if(!d)return;
-  var url=URL.createObjectURL(new Blob([playerHtml(d)],{type:'text/html'}));
-  window.open(url,'_blank');
+  var fr=$('pvFrame');
+  fr.onload=function(){try{fr.contentDocument.addEventListener('keydown',function(e){if(e.key==='Escape')closePreview()})}catch(_){}};
+  fr.setAttribute('srcdoc',playerHtml(d));
+  $('pvOverlay').classList.remove('hidden');
+  document.body.style.overflow='hidden';
+  $('pvClose').focus();
 });
+$('pvClose').addEventListener('click',closePreview);
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closePreview()});
+function closePreview(){
+  $('pvOverlay').classList.add('hidden');
+  $('pvFrame').removeAttribute('srcdoc');
+  document.body.style.overflow='';
+}
 $('download').addEventListener('click',function(){
   var d=requireValid();if(!d)return;
   var a=document.createElement('a');
