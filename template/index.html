@@ -41,6 +41,11 @@ input:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:1px;borde
 .btn.ghost:hover{background:var(--pale)}
 .btn.small{padding:7px 16px;font-size:.82rem}
 .btn.warn{background:#fff;color:var(--err);border:1.5px solid var(--err)}
+.btn:disabled,.btn.ghost:disabled{background:#e2e8f0;color:#94a3b8;border-color:#e2e8f0;cursor:not-allowed}
+input.invalid,textarea.invalid{border-color:var(--err);background:#fef2f2;outline-color:var(--err)}
+.ready{font-size:.88rem;font-weight:700;flex-basis:100%;margin-bottom:2px}
+.ready.ok{color:var(--ok)}
+.ready.err{color:var(--err)}
 .btn.warn:hover{background:#fef2f2}
 .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:18px}
 .roundcard{border:1px solid var(--border-soft);border-left:4px solid var(--accent);border-radius:var(--rs);padding:18px 20px;margin:14px 0;background:#fff}
@@ -113,6 +118,7 @@ details.help li{margin-bottom:.4em}
 </section>
 
 <div class="bigactions">
+  <span class="ready" id="readyMsg" role="status"></span>
   <button class="btn" id="preview">▶ Preview the game</button>
   <button class="btn" id="download">Download game file</button>
   <button class="btn ghost" id="shareLink">Copy share link</button>
@@ -183,7 +189,7 @@ $('rounds').addEventListener('input',function(e){
   var v=e.target.value;
   if(['min','max','step','answer'].indexOf(f)>=0){rounds[k][f]=v===''?'':parseFloat(v)}
   else rounds[k][f]=v;
-  validate(k);
+  validate(k);updateActions();
 });
 $('rounds').addEventListener('click',function(e){
   var btn=e.target.closest('button[data-act]');if(!btn)return;
@@ -194,22 +200,40 @@ $('rounds').addEventListener('click',function(e){
   render();
 });
 function problems(r){
-  var p=[];
-  if(!r.q||!r.q.trim())p.push('question wording is empty');
-  if(r.answer===''||isNaN(r.answer))p.push('data answer is missing');
-  if(r.min===''||r.max===''||isNaN(r.min)||isNaN(r.max)||r.min>=r.max)p.push('slider min must be below max');
-  if(r.step===''||isNaN(r.step)||r.step<=0)p.push('step must be above 0');
-  if(!isNaN(r.answer)&&!isNaN(r.min)&&!isNaN(r.max)&&(r.answer<r.min||r.answer>r.max))p.push('answer is outside the slider range');
-  return p;
+  var p=[],bad={};
+  if(!r.q||!String(r.q).trim()){p.push('question wording is required');bad.q=1}
+  if(r.answer===''||isNaN(r.answer)){p.push('data answer is required');bad.answer=1}
+  if(r.min===''||isNaN(r.min)){p.push('slider min is required');bad.min=1}
+  if(r.max===''||isNaN(r.max)){p.push('slider max is required');bad.max=1}
+  if(!bad.min&&!bad.max&&r.min>=r.max){p.push('slider min must be below max');bad.min=1;bad.max=1}
+  if(r.step===''||isNaN(r.step)||r.step<=0){p.push('step must be a number above 0');bad.step=1}
+  if(!bad.answer&&!bad.min&&!bad.max&&(r.answer<r.min||r.answer>r.max)){p.push('answer is outside the slider range');bad.answer=1}
+  return {list:p,bad:bad};
 }
 function validate(k){
   var el=$('st'+k);if(!el)return true;
-  var p=problems(rounds[k]);
-  el.className='status '+(p.length?'err':'ok');
-  el.textContent=p.length?('⚠ '+p[0]):'✓ ready';
-  return !p.length;
+  var res=problems(rounds[k]);
+  el.className='status '+(res.list.length?'err':'ok');
+  el.textContent=res.list.length?('⚠ '+res.list[0]):'✓ ready';
+  ['q','answer','min','max','step'].forEach(function(f){
+    var inp=$('r'+k+'_'+f);if(!inp)return;
+    inp.classList.toggle('invalid',!!res.bad[f]);
+    if(res.bad[f])inp.setAttribute('aria-invalid','true');else inp.removeAttribute('aria-invalid');
+  });
+  return !res.list.length;
 }
-function validateAll(){var ok=rounds.length>0;rounds.forEach(function(_,k){if(!validate(k))ok=false});return ok}
+function validateAll(){var ok=rounds.length>0;rounds.forEach(function(_,k){if(!validate(k))ok=false});updateActions(ok);return ok}
+function updateActions(ok){
+  if(ok===undefined){ok=rounds.length>0;rounds.forEach(function(r){if(problems(r).list.length)ok=false})}
+  ['preview','download','shareLink'].forEach(function(id){$(id).disabled=!ok});
+  var rm=$('readyMsg');
+  if(!rounds.length){rm.className='ready err';rm.textContent='Add at least one question to enable preview, download and share.'}
+  else{
+    var good=rounds.filter(function(r){return !problems(r).list.length}).length;
+    if(ok){rm.className='ready ok';rm.textContent='✓ All '+rounds.length+(rounds.length===1?' question is':' questions are')+' ready — preview, download or share your game.'}
+    else{rm.className='ready err';rm.textContent=good+' of '+rounds.length+' questions ready — complete the highlighted fields to enable the buttons below.'}
+  }
+}
 function msg(t,ok){var m=$('msg');m.textContent=t;m.className='msg '+(ok?'ok':'err');if(t)setTimeout(function(){if(m.textContent===t)m.textContent=''},4000)}
 
 function gameData(){
