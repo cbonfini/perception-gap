@@ -102,8 +102,14 @@ details.help li{margin-bottom:.4em}
   <div id="rounds"></div>
   <div class="actions">
     <button class="btn ghost" id="addRound">+ Add a question</button>
+    <button class="btn ghost" id="importSheet">Import spreadsheet (.xlsx / .csv)</button>
     <button class="btn ghost" id="loadExample">Load example questions</button>
+    <input type="file" id="sheetFile" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" class="hidden">
   </div>
+  <p class="fieldnote" style="margin-top:10px">Prefer working in a spreadsheet? Download the
+  <a href="template.xlsx" download>Excel template</a> or the
+  <a href="template.csv" download>CSV template</a>, fill in one row per question, and import it here.
+  Importing replaces the questions currently in the builder.</p>
 </section>
 
 <div class="bigactions">
@@ -114,6 +120,11 @@ details.help li{margin-bottom:.4em}
   <button class="btn ghost" id="importJson">Import questions</button>
   <input type="file" id="importFile" accept=".json,application/json" class="hidden">
   <span class="msg" id="msg" role="status"></span>
+</div>
+<div class="card hidden" id="linkBox">
+  <h3 style="margin-bottom:6px">Your game's share link</h3>
+  <p class="fieldnote" style="margin:0 0 10px">The entire game travels inside this link — anyone who opens it plays your game. Paste it into an email, a syllabus, or an LMS page. (For very large question sets, or systems that truncate long links, use Download instead.)</p>
+  <input type="text" id="linkOut" readonly aria-label="Share link" onclick="this.select()">
 </div>
 
 </div></main>
@@ -263,9 +274,11 @@ $('shareLink').addEventListener('click',function(){
   if(location.protocol==='file:'){msg('Share links need this builder to be hosted on the web — use Download instead.',false);return}
   var b64=btoa(unescape(encodeURIComponent(JSON.stringify(d))));
   var url=new URL('play.html',location.href).href+'#p='+encodeURIComponent(b64);
+  $('linkOut').value=url;$('linkBox').classList.remove('hidden');
+  $('linkOut').select();
   (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(
-    function(){msg('Share link copied — anyone who opens it plays your game.',true)},
-    function(){prompt('Copy this link:',url)});
+    function(){msg('Share link copied — it is also shown below.',true)},
+    function(){msg('Copy the link from the box below.',true)});
 });
 $('exportJson').addEventListener('click',function(){
   var d=gameData();
@@ -289,6 +302,98 @@ $('importFile').addEventListener('change',function(){
     }catch(e){msg('That file isn’t a question set from this builder.',false)}
   };
   rd.readAsText(f);this.value='';
+});
+/* ---- spreadsheet import ---- */
+function normHeader(h){return String(h||'').toLowerCase().replace(/[^a-z]/g,'')}
+var COLMAP={question:'q',context:'context',prefix:'prefix',unit:'unit',unitlabel:'unit',
+  slidermin:'min',min:'min',slidermax:'max',max:'max',sliderstep:'step',step:'step',
+  answer:'answer',dataanswer:'answer',answerdisplay:'answerText',answertext:'answerText',
+  whythegap:'why',why:'why',explanation:'why',sourcename:'src',source:'src',sourceurl:'srcUrl',sourcelink:'srcUrl'};
+function niceMax(ans){var t=Math.abs(ans)*3||10;var p=Math.pow(10,Math.floor(Math.log(t)/Math.LN10));
+  var m=t/p;var n=m<=1?1:m<=2?2:m<=5?5:10;return n*p}
+function rowsToRounds(grid){
+  if(!grid.length)throw 'empty';
+  var head=grid[0].map(normHeader);
+  if(head.indexOf('question')<0)throw 'noheader';
+  var out=[];
+  for(var r=1;r<grid.length;r++){
+    var row=grid[r];if(!row||!String(row[head.indexOf('question')]||'').trim())continue;
+    var b=blankRound();
+    head.forEach(function(h,c){var f=COLMAP[h];if(!f)return;var v=row[c];
+      if(v==null||v==='')return;
+      if(['min','max','step','answer'].indexOf(f)>=0){v=parseFloat(String(v).replace(/[, ]/g,''));if(isNaN(v))return}
+      b[f]=v;});
+    if(b.answer!==''&&!isNaN(b.answer)){
+      if(b.min===''||isNaN(b.min))b.min=0;
+      if(b.step===''||isNaN(b.step)||b.step<=0)b.step=Math.abs(b.answer)<5?0.1:1;
+      if(b.max===''||isNaN(b.max)||b.max<=b.min)b.max=niceMax(b.answer);
+    }
+    out.push(b);
+  }
+  if(!out.length)throw 'norows';
+  return out;
+}
+function parseCsv(text){
+  var rows=[],row=[],cur='',q=false;
+  if(text.charCodeAt(0)===0xFEFF)text=text.slice(1);
+  for(var i=0;i<text.length;i++){
+    var ch=text[i];
+    if(q){if(ch==='"'){if(text[i+1]==='"'){cur+='"';i++}else q=false}else cur+=ch}
+    else if(ch==='"')q=true;
+    else if(ch===','){row.push(cur);cur=''}
+    else if(ch==='\n'||ch==='\r'){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cur);cur='';if(row.length>1||row[0]!=='')rows.push(row);row=[]}
+    else cur+=ch;
+  }
+  if(cur!==''||row.length){row.push(cur);rows.push(row)}
+  return rows;
+}
+function loadSheetJs(){
+  return new Promise(function(res,rej){
+    if(window.XLSX)return res();
+    var tried=0;
+    function attempt(src){
+      var sc=document.createElement('script');sc.src=src;
+      sc.onload=function(){res()};
+      sc.onerror=function(){tried++;tried<2?attempt('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'):rej()};
+      document.head.appendChild(sc);
+    }
+    attempt(new URL('xlsx.full.min.js',location.href).href);
+  });
+}
+function applyImported(list,name){
+  var replaced=rounds.filter(function(r){return r.q&&r.q.trim()}).length;
+  rounds=list;render();
+  msg('Imported '+list.length+' question'+(list.length===1?'':'s')+' from '+name+(replaced?' (replaced '+replaced+' existing)':'')+'. Check the ⚠ flags, if any.',true);
+}
+function importError(e,name){
+  var t=e==='noheader'?'No "question" column found — use the template headers.':
+        e==='norows'?'No filled-in question rows found in '+name+'.':
+        'Could not read '+name+'. Save it as .xlsx or .csv and try again.';
+  msg(t,false);
+}
+$('importSheet').addEventListener('click',function(){$('sheetFile').click()});
+$('sheetFile').addEventListener('change',function(){
+  var f=this.files[0];this.value='';if(!f)return;
+  var name=f.name;
+  if(/\.csv$/i.test(name)){
+    var rd=new FileReader();
+    rd.onload=function(){try{applyImported(rowsToRounds(parseCsv(rd.result)),name)}catch(e){importError(e,name)}};
+    rd.readAsText(f);
+  }else{
+    loadSheetJs().then(function(){
+      var rd=new FileReader();
+      rd.onload=function(){
+        try{
+          var wb=XLSX.read(new Uint8Array(rd.result),{type:'array'});
+          var sheet=wb.Sheets['Questions']||wb.Sheets[wb.SheetNames.find(function(n){
+            var g=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1});
+            return g[0]&&g[0].map(normHeader).indexOf('question')>=0;})||wb.SheetNames[0]];
+          applyImported(rowsToRounds(XLSX.utils.sheet_to_json(sheet,{header:1,defval:''})),name);
+        }catch(e){importError(e,name)}
+      };
+      rd.readAsArrayBuffer(f);
+    },function(){msg('Could not load the spreadsheet reader — save the file as CSV and import that instead.',false)});
+  }
 });
 rounds=[blankRound()];render();
 </script>
